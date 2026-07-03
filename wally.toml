@@ -1,8 +1,24 @@
 [package]
 name = "larsen-dev/statemachine"
+description = "Roblox FSM."
+keywords = ["generic", "typed", "event", "performance"]
 version = "0.1.0"
+license = "MIT"
+authors = ["Larsen-dev"]
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
+repository = "https://github.com/Larsen-dev/stateMachine"
+
+exclude = [
+    ".github",
+    ".gitignore",
+    "README.md",
+    "aftman.toml",
+    "selene.toml",
+    "roblox.yml",
+    "default.project.json",
+    "*.spec.luau"
+]
 
 [dependencies]
 signal = "larsen-dev/signal@1.0.0"
