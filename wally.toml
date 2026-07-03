@@ -1,0 +1,9 @@
+[package]
+name = "larsen-dev/statemachine"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+signal = "larsen-dev/signal@1.0.0"
+collections = "larsen-dev/collections@0.1.1"

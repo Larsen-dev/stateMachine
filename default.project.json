@@ -1,0 +1,10 @@
+{
+  "name": "stateMachine",
+  "tree": {
+    "$path": "src",
+
+    "Packages": {
+      "$path": "Packages"
+    }
+  }
+}
