@@ -2,8 +2,8 @@
 .aftman/
 
 # Wally
-Packages/
-wally.lock
+/Packages
+/wally.lock
 
 # Rojo
 *.rbxl
