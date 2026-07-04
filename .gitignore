@@ -2,6 +2,7 @@
 .aftman/
 
 # Wally
+Packages/
 wally.lock
 
 # Rojo
