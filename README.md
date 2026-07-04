@@ -1,6 +1,5 @@
 # stateMachine
-Roblox FSM (Finite State Machine) for small projects and simple systems. Yet still incomplete and edgy, so there's
-no Wally package or .rbxm file. Gotta be soon.
+A clean and easy-to-use state machine library for Luau. Perfect for managing character states, UI flows, game modes, and complex behaviors in Roblox experiences.
 
 ## Usage
 ```lua
