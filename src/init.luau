@@ -1,10 +1,12 @@
+--!strict
+
 -- Dependecies
 local signal = require(script.Packages.signal)
---local collections = require(script.Packages.collections)
+local collections = require(script.Packages.collections)
 
 -- Functions
 
-local function default<context>(_: context)
+local function default<context>(context: context): boolean
 	return true
 end
 
@@ -13,24 +15,27 @@ local state = {}
 state._prototype = {}
 state.__index = state._prototype
 
-type StateData = {
+type stateData = {
 	name: string,
+	interruptible: boolean,
 }
 
-type StatePrototype<context, args...> = {
-	onEnter: (self: State<context, args...>, context: context) -> ()?,
-	onLeave: (self: State<context, args...>, context: context) -> ()?,
-	update: (self: State<context, args...>, context: context, args...) -> ()?,
-	lock: (self: State<context, args...>) -> (),
-	unlock: (self: State<context, args...>) -> (),
+type statePrototype<context, args...> = {
+	onEnter: (self: state<context, args...>, context: context) -> ()?,
+	onLeave: (self: state<context, args...>, context: context) -> ()?,
+	update: (self: state<context, args...>, context: context, args...) -> ()?,
 }
 
-export type State<context, args...> = setmetatable<StateData, { __index: StatePrototype<context, args...> }>
+export type state<context, args...> = typeof(setmetatable(
+	{} :: stateData,
+	{ __index = {} :: statePrototype<context, args...> }
+))
 
-function state.new<context, args...>(name: string): State<context, args...>
+function state.new<context, args...>(name: string, interruptible: boolean): state<context, args...>
 	return setmetatable({
 		name = name,
-	}, state) :: State<context, args...>
+		interruptible = interruptible,
+	}, state) :: state<context, args...>
 end
 
 -- StateMachine
@@ -38,85 +43,128 @@ local stateMachine = {}
 stateMachine._prototype = {}
 stateMachine.__index = stateMachine._prototype
 
-type StateMachineData<context, args...> = {
-	_current: State<context, args...>?,
-	_states: { [string]: State<context, args...> },
-	_transitions: { [string]: { [string]: { can: boolean, condition: (context: context) -> boolean } } },
+type stateMachineData<context, args...> = {
+	_previous: state<context, args...>?,
+	_current: state<context, args...>?,
+	_states: { [string]: state<context, args...> },
+	_transitions: { [string]: { [string]: { condition: (context: context) -> boolean } } },
 	_transitioning: boolean,
-	_pending: string?,
+	_pending: collections.queue<string>,
 
 	context: context,
 	transitioned: signal.Signal<string, string>,
+	entered: signal.Signal<string>,
+	left: signal.Signal<string>,
 	transitionFailed: signal.Signal<string, context>,
 }
 
-type StateMachinePrototype<context, args...> = {
-	registerState: (self: StateMachine<context, args...>, st: State<context, args...>) -> (),
+type stateMachinePrototype<context, args...> = {
+	registerState: (self: stateMachine<context, args...>, st: state<context, args...>) -> (),
 	registerTransition: (
-		self: StateMachine<context, args...>,
+		self: stateMachine<context, args...>,
 		from: string,
 		to: string,
 		condition: ((context: context) -> boolean)?
 	) -> (),
-	canTransition: (self: StateMachine<context, args...>, from: string, to: string) -> boolean,
-	canTransitionNow: (self: StateMachine<context, args...>, from: string, to: string) -> boolean,
-	requestTransition: (self: StateMachine<context, args...>, to: string) -> (),
+	registerGlobalTransition: (
+		self: stateMachine<context, args...>,
+		to: string,
+		condition: ((context: context) -> boolean)?
+	) -> (),
+	canTransition: (self: stateMachine<context, args...>, from: string, to: string) -> boolean,
+	canTransitionNow: (self: stateMachine<context, args...>, from: string, to: string) -> boolean,
+	requestTransition: (self: stateMachine<context, args...>, to: string, delay: number?) -> (),
+	forceTransition: (self: stateMachine<context, args...>, to: string) -> (),
 	bindUpdate: (
-		self: StateMachine<context, args...>,
+		self: stateMachine<context, args...>,
 		to: RBXScriptSignal | signal.Signal<args...>
 	) -> RBXScriptConnection | signal.Connection<args...>,
 	bindTransition: (
-		self: StateMachine<context, args...>,
+		self: stateMachine<context, args...>,
 		to: RBXScriptSignal | signal.Signal<args...>,
 		fromState: string,
 		toState: string
 	) -> (RBXScriptConnection | signal.Connection<args...>)?,
 }
 
-export type StateMachine<context, args...> = setmetatable<
-	StateMachineData<context, args...>,
-	{ __index: StateMachinePrototype<context, args...> }
->
+export type stateMachine<context, args...> = typeof(setmetatable(
+	{} :: stateMachineData<context, args...>,
+	{ __index = {} :: stateMachinePrototype<context, args...> }
+))
 
-function stateMachine._prototype:registerState<context, args...>(st: State<context, args...>)
+function stateMachine._prototype:registerState<context, args...>(st: state<context, args...>)
 	self._states[st.name] = st
 end
 
-function stateMachine._prototype:registerTransition<context>(from: string, to: string, condition: (context: context) -> boolean)
+function stateMachine._prototype:registerTransition<context>(
+	from: string,
+	to: string,
+	condition: ((context: context) -> boolean)?
+)
 	if not self._transitions[from] then
 		self._transitions[from] = {}
 	end
+
 	self._transitions[from][to] = {
-		can = true,
 		condition = condition or default,
 	}
 end
 
+function stateMachine._prototype:registerGlobalTransition<context>(to: string, condition: ((context: context) -> boolean)?)
+	condition = condition or default
+
+	for name, _ in pairs(self._states) do
+		if not self._transitions[name] then
+			self._transitions[name] = {}
+		end
+
+		self._transitions[name][to] = {
+			condition = condition,
+		}
+	end
+end
+
 function stateMachine._prototype:canTransition(from: string, to: string): boolean
-	return self._transitions[from] and self._transitions[from][to] and self._transitions[from][to]["can"]
+	local t = self._transitions[from] and self._transitions[from][to]
+	return t ~= nil
 end
 
 function stateMachine._prototype:canTransitionNow(from: string, to: string): boolean
-	return not self._transitioning
-		and self._transitions[from]
-		and self._transitions[from][to]
-		and self._transitions[from][to]["can"]
-		and self._transitions[from][to]["condition"](self.context)
+	if self._transitioning then
+		return false
+	end
+
+	local t = self._transitions[from] and self._transitions[from][to]
+	return t ~= nil and t.condition(self.context)
 end
 
-function stateMachine._prototype:requestTransition(to: string)
-	self._pending = to
+function stateMachine._prototype:requestTransition(to: string, delay: number?)
+	if delay then
+		task.delay(delay, function()
+			self._pending:enqueue(to)
+		end)
+	else
+		self._pending:enqueue(to)
+	end
 end
 
 function stateMachine._prototype:_transition(to: string)
 	local current = self._current
+	if current and not current.interruptible then
+		return
+	end
+
 	if current and not self:canTransitionNow(current.name, to) then
-		self.transitionFailed:Fire(string.format("Failed transition to %s.", to), self.context)
+		self.transitionFailed:Fire(string.format('Can\'t transition to "%s" at current time.', to), self.context)
+		warn(string.format('Can\'t transition to "%s" at current time.', to), self.context)
 		return
 	end
 
 	local nextState = self._states[to]
+
 	if not nextState then
+		self.transitionFailed:Fire(string.format('Unknown state "%s"', to), self.context)
+		warn(string.format('Unknown state "%s"', to))
 		return
 	end
 
@@ -127,15 +175,48 @@ function stateMachine._prototype:_transition(to: string)
 	end
 
 	local fromName = if current then current.name else ""
+	self.left:Fire(fromName)
 
+	self._previous = self._current
 	self._current = nextState
 
 	if nextState.onEnter then
 		nextState:onEnter(self.context)
 	end
+	self.entered:Fire(to)
 
 	self._transitioning = false
+	self.transitioned:Fire(fromName, to)
+end
 
+function stateMachine._prototype:forceTransition(to: string)
+	local current = self._current
+	local nextState = self._states[to]
+
+	if not nextState then
+		self.transitionFailed:Fire(string.format('Unknown state "%s"', to), self.context)
+		warn(string.format('Unknown state "%s"', to))
+		return
+	end
+
+	self._transitioning = true
+
+	if current and current.onLeave then
+		current:onLeave(self.context)
+	end
+
+	local fromName = if current then current.name else ""
+	self.left:Fire(fromName)
+
+	self._previous = self._current
+	self._current = nextState
+
+	if nextState.onEnter then
+		nextState:onEnter(self.context)
+	end
+	self.entered:Fire(to)
+
+	self._transitioning = false
 	self.transitioned:Fire(fromName, to)
 end
 
@@ -143,17 +224,18 @@ function stateMachine._prototype:bindUpdate<Args...>(
 	to: RBXScriptSignal | signal.Signal<Args...>
 ): RBXScriptConnection | signal.Connection<Args...>
 	return to:Connect(function(...: Args...)
-		if self._pending and (not self._current or self:canTransitionNow(self._current.name, self._pending)) then
-			local nextState = self._pending :: string?
-			self._pending = nil
+		if self._current and self._current.update then
+			self._current:update(self.context, ...)
+		end
+
+		if
+			not self._pending:isEmpty()
+			and (not self._current or self:canTransitionNow(self._current.name, self._pending:peek()))
+		then
+			local nextState = self._pending:dequeue()
 
 			self:_transition(nextState)
 		end
-
-		if not self._current or not self._current.update then
-			return
-		end
-		self._current:update(self.context, ...)
 	end)
 end
 
@@ -171,21 +253,25 @@ function stateMachine._prototype:bindTransition<Args...>(
 			return
 		end
 
-		self:transition(toState)
+		self:_transition(toState)
 	end)
 end
 
-function stateMachine.new<context, args...>(context: context): StateMachine<context, args...>
+function stateMachine.new<context, args...>(context: context): stateMachine<context, args...>
 	return setmetatable({
 		_states = {},
 		_transitions = {},
 		_current = nil,
+		_previous = nil,
 		_transitioning = false,
-		_pending = nil,
+		_pending = collections.newQueue() :: collections.queue<string>,
 
 		context = context,
-		transitioned = signal.new() :: signal.Signal<args...>,
-	}, stateMachine) :: StateMachine<context, args...>
+		transitioned = signal.new() :: signal.Signal<string, string>,
+		transitionFailed = signal.new() :: signal.Signal<string, context>,
+		entered = signal.new() :: signal.Signal<string>,
+		left = signal.new() :: signal.Signal<string>,
+	}, stateMachine) :: stateMachine<context, args...>
 end
 
 return table.freeze({
