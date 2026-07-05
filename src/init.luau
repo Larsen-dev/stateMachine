@@ -34,7 +34,7 @@ export type state<context, args...> = typeof(setmetatable(
 function state.new<context, args...>(name: string, interruptible: boolean?): state<context, args...>
 	return setmetatable({
 		name = name,
-		interruptible = interruptible or false,
+		interruptible = interruptible or true,
 	}, state) :: state<context, args...>
 end
 
