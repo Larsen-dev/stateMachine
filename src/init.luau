@@ -31,10 +31,10 @@ export type state<context, args...> = typeof(setmetatable(
 	{ __index = {} :: statePrototype<context, args...> }
 ))
 
-function state.new<context, args...>(name: string, interruptible: boolean): state<context, args...>
+function state.new<context, args...>(name: string, interruptible: boolean?): state<context, args...>
 	return setmetatable({
 		name = name,
-		interruptible = interruptible,
+		interruptible = interruptible or false,
 	}, state) :: state<context, args...>
 end
 
