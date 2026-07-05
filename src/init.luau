@@ -253,7 +253,7 @@ function stateMachine._prototype:bindTransition<Args...>(
 			return
 		end
 
-		self:_transition(toState)
+		self:requestTransition(toState)
 	end)
 end
 
