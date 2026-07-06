@@ -1,6 +1,6 @@
 [package]
 name = "larsen-dev/statemachine"
-description = "Roblox FSM."
+description = "Roblox context-based FSM."
 keywords = ["generic", "typed", "event", "performance"]
 version = "0.1.0"
 license = "MIT"
