@@ -6,7 +6,7 @@ local collections = require(script.Packages.collections)
 
 -- Functions
 
-local function default<context>(context: context): boolean
+local function default<context>(context: context): (boolean, string?)
 	return true
 end
 
@@ -47,7 +47,7 @@ type stateMachineData<context, args...> = {
 	_previous: state<context, args...>?,
 	_current: state<context, args...>?,
 	_states: { [string]: state<context, args...> },
-	_transitions: { [string]: { [string]: { condition: (context: context) -> boolean } } },
+	_transitions: { [string]: { [string]: { guard: (context: context) -> (boolean, string?) } } },
 	_transitioning: boolean,
 	_pending: collections.queue<string>,
 
@@ -64,12 +64,12 @@ type stateMachinePrototype<context, args...> = {
 		self: stateMachine<context, args...>,
 		from: string,
 		to: string,
-		condition: ((context: context) -> boolean)?
+		guard: ((context: context) -> (boolean, string?))?
 	) -> (),
 	registerGlobalTransition: (
 		self: stateMachine<context, args...>,
 		to: string,
-		condition: ((context: context) -> boolean)?
+		guard: ((context: context) -> (boolean, string?))?
 	) -> (),
 	canTransition: (self: stateMachine<context, args...>, from: string, to: string) -> boolean,
 	canTransitionNow: (self: stateMachine<context, args...>, from: string, to: string) -> boolean,
@@ -99,19 +99,22 @@ end
 function stateMachine._prototype:registerTransition<context>(
 	from: string,
 	to: string,
-	condition: ((context: context) -> boolean)?
+	guard: ((context: context) -> (boolean, string?))?
 )
 	if not self._transitions[from] then
 		self._transitions[from] = {}
 	end
 
 	self._transitions[from][to] = {
-		condition = condition or default,
+		guard = guard or default,
 	}
 end
 
-function stateMachine._prototype:registerGlobalTransition<context>(to: string, condition: ((context: context) -> boolean)?)
-	condition = condition or default
+function stateMachine._prototype:registerGlobalTransition<context>(
+	to: string,
+	guard: ((context: context) -> (boolean, string?))?
+)
+	guard = guard or default
 
 	for name, _ in pairs(self._states) do
 		if not self._transitions[name] then
@@ -119,7 +122,7 @@ function stateMachine._prototype:registerGlobalTransition<context>(to: string, c
 		end
 
 		self._transitions[name][to] = {
-			condition = condition,
+			guard = guard,
 		}
 	end
 end
@@ -129,13 +132,15 @@ function stateMachine._prototype:canTransition(from: string, to: string): boolea
 	return t ~= nil
 end
 
-function stateMachine._prototype:canTransitionNow(from: string, to: string): boolean
+function stateMachine._prototype:canTransitionNow(from: string, to: string): (boolean, string?)
 	if self._transitioning then
 		return false
 	end
 
 	local t = self._transitions[from] and self._transitions[from][to]
-	return t ~= nil and t.condition(self.context)
+	local can, _ = t.guard(self.context)
+
+	return t ~= nil and can
 end
 
 function stateMachine._prototype:requestTransition(to: string, delay: number?)
