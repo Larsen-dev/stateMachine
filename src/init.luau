@@ -6,6 +6,7 @@ local collections = require(script.Packages.collections)
 
 -- Functions
 
+-- Default guard function.
 local function default<context>(context: context): (boolean, string?)
 	return true
 end
@@ -31,6 +32,14 @@ export type state<context, args...> = typeof(setmetatable(
 	{ __index = {} :: statePrototype<context, args...> }
 ))
 
+--[=[
+	@return state<context, args...>;
+	@param name string;
+	@param interruptible boolean?;
+
+	Creates new state metatable. Interruptible decides whether transition
+	from this state will be possible, default to false.
+]=]
 function state.new<context, args...>(name: string, interruptible: boolean?): state<context, args...>
 	return setmetatable({
 		name = name,
@@ -92,10 +101,24 @@ export type stateMachine<context, args...> = typeof(setmetatable(
 	{ __index = {} :: stateMachinePrototype<context, args...> }
 ))
 
+--[=[
+	@return ;
+	@param st state<context, args...>;
+
+	Registers new state to state machine.
+]=]
 function stateMachine._prototype:registerState<context, args...>(st: state<context, args...>)
 	self._states[st.name] = st
 end
 
+--[=[
+	@return ;
+	@param from string;
+	@param to string;
+	@param guard ((context: context) -> (boolean, string?))?;
+
+	Registers transitions from some state to other.
+]=]
 function stateMachine._prototype:registerTransition<context>(
 	from: string,
 	to: string,
@@ -110,6 +133,13 @@ function stateMachine._prototype:registerTransition<context>(
 	}
 end
 
+--[=[
+	@return ;
+	@param to string;
+	@param guard ((context: context) -> (boolean, string?))?;
+
+	Registers transition to some transition from all registered states.
+]=]
 function stateMachine._prototype:registerGlobalTransition<context>(
 	to: string,
 	guard: ((context: context) -> (boolean, string?))?
@@ -127,22 +157,52 @@ function stateMachine._prototype:registerGlobalTransition<context>(
 	end
 end
 
+--[=[
+	@return boolean;
+	@param from string;
+	@param to string;
+
+	Checks whether transition is possible from some state to other.
+]=]
 function stateMachine._prototype:canTransition(from: string, to: string): boolean
 	local t = self._transitions[from] and self._transitions[from][to]
 	return t ~= nil
 end
 
+--[=[
+	@return boolean, string?;
+	@param from string;
+	@param to string;
+
+	Checks whether transition from some state to some state is possible at
+	the current moment. Returns whethere machine can transition and a reason
+	if not.
+]=]
 function stateMachine._prototype:canTransitionNow(from: string, to: string): (boolean, string?)
 	if self._transitioning then
-		return false
+		return false, "Machine is transitioning to other state."
 	end
 
-	local t = self._transitions[from] and self._transitions[from][to]
-	local can, _ = t.guard(self.context)
+	local transitions = self._transitions[from]
+	if not transitions then
+		return false, "Unknown transition."
+	end
 
-	return t ~= nil and can
+	local transition = transitions[to]
+	if not transition then
+		return false, "Transition not registered."
+	end
+
+	return transition.guard(self.context)
 end
 
+--[=[
+	@return ;
+	@param to string;
+	@param delay number?;
+
+	Adds some transition into request queue with possible delay.
+]=]
 function stateMachine._prototype:requestTransition(to: string, delay: number?)
 	if delay then
 		task.delay(delay, function()
@@ -153,15 +213,23 @@ function stateMachine._prototype:requestTransition(to: string, delay: number?)
 	end
 end
 
+--[=[
+	@return ;
+	@param to string;
+
+	Basic transition logic.
+]=]
 function stateMachine._prototype:_transition(to: string)
 	local current = self._current
 	if current and not current.interruptible then
 		return
 	end
 
-	if current and not self:canTransitionNow(current.name, to) then
-		self.transitionFailed:Fire(string.format('Can\'t transition to "%s" at current time.', to), self.context)
-		warn(string.format('Can\'t transition to "%s" at current time.', to), self.context)
+	local can, reason = if current then self:canTransitionNow(current.name, to) else nil, nil
+
+	if not can then
+		self.transitionFailed:Fire(reason, self.context)
+		warn(string.format('Can\'t transition to "%s" at current time. Reason: %s', to, tostring(reason)))
 		return
 	end
 
@@ -194,6 +262,12 @@ function stateMachine._prototype:_transition(to: string)
 	self.transitioned:Fire(fromName, to)
 end
 
+--[=[
+	@return ;
+	@param to string;
+
+	Forces transition to some state ignoring current cycle and guards
+]=]
 function stateMachine._prototype:forceTransition(to: string)
 	local current = self._current
 	local nextState = self._states[to]
@@ -225,6 +299,12 @@ function stateMachine._prototype:forceTransition(to: string)
 	self.transitioned:Fire(fromName, to)
 end
 
+--[=[
+	@return RBXScriptConnection | Connection<Args...>;
+	@param to RBXScriptSignal | Signal<Args...>;
+
+	Binds machine update cycle to some signal object.
+]=]
 function stateMachine._prototype:bindUpdate<Args...>(
 	to: RBXScriptSignal | signal.Signal<Args...>
 ): RBXScriptConnection | signal.Connection<Args...>
@@ -233,10 +313,11 @@ function stateMachine._prototype:bindUpdate<Args...>(
 			self._current:update(self.context, ...)
 		end
 
-		if
-			not self._pending:isEmpty()
-			and (not self._current or self:canTransitionNow(self._current.name, self._pending:peek()))
-		then
+		local can, reason =
+			if self._current then self:canTransitionNow(self._current.name, self._pending:peek()) else nil, nil
+		warn(string.format('Can\'t transition to "%s" at current time. Reason: %s', to, tostring(reason)))
+
+		if not self._pending:isEmpty() and can then
 			local nextState = self._pending:dequeue()
 
 			self:_transition(nextState)
@@ -244,6 +325,15 @@ function stateMachine._prototype:bindUpdate<Args...>(
 	end)
 end
 
+--[=[
+	@return RBXScriptConnection | Connection<Args...>;
+	@param to RBXScriptSignal | Signal<Args...>;
+	@param fromState string;
+	@param toState string;
+
+	Binds transition from some state to another to some signal
+	object.
+]=]
 function stateMachine._prototype:bindTransition<Args...>(
 	to: RBXScriptSignal | signal.Signal<Args...>,
 	fromState: string,
@@ -262,6 +352,12 @@ function stateMachine._prototype:bindTransition<Args...>(
 	end)
 end
 
+--[=[
+	@return stateMachine<context, args...>;
+	@param context context;
+
+	Creates new stateMachine metatable.
+]=]
 function stateMachine.new<context, args...>(context: context): stateMachine<context, args...>
 	return setmetatable({
 		_states = {},
