@@ -79,17 +79,20 @@ type stateMachinePrototype<context, args...> = {
 		self: stateMachine<context, args...>,
 		from: string,
 		to: string,
-		guard: ((context: context) -> (boolean, string?))?
+		data: transitionData<context>
 	) -> (),
 	registerGlobalTransition: (
 		self: stateMachine<context, args...>,
 		to: string,
-		guard: ((context: context) -> (boolean, string?))?
+		data: transitionData<context>
 	) -> (),
 	canTransition: (self: stateMachine<context, args...>, from: string, to: string) -> boolean,
 	canTransitionNow: (self: stateMachine<context, args...>, from: string, to: string) -> boolean,
 	requestTransition: (self: stateMachine<context, args...>, to: string, delay: number?) -> (),
 	forceTransition: (self: stateMachine<context, args...>, to: string) -> (),
+	currentName: (self: stateMachine<context, args...>) -> string?,
+	previousName: (self: stateMachine<context, args...>) -> string?,
+	setInitialState: (self: stateMachine<context, args...>, to: string) -> (),
 	bindUpdate: (
 		self: stateMachine<context, args...>,
 		to: RBXScriptSignal | signal.Signal<args...>
