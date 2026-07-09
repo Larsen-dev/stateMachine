@@ -17,6 +17,6 @@ end
 local machine = stateMachine.newStateMachine() :: stateMachine.StateMachine<{ message: string }, number>
 
 machine:registerState(someState)
-machine:requestTransition("someState")
+machine:setInitialState("someState")
 machine:bindUpdate(RunService.Heartbeat)
 ```
