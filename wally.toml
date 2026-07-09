@@ -22,4 +22,4 @@ exclude = [
 
 [dependencies]
 signal = "larsen-dev/signal@1.0.1"
-collections = "larsen-dev/collections@1.0.0"
+collections = "larsen-dev/collections@1.1.0"

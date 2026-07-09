@@ -348,13 +348,13 @@ function stateMachine._prototype:bindUpdate<Args...>(
 			self._current:update(self.context, ...)
 		end
 
-		if not self._pending:isEmpty() then
+		if self._pending:isEmpty() then
 			return
 		end
 
 		local can, reason =
 			if self._current then self:canTransitionNow(self._current.name, self._pending:peek()) else nil, nil
-		warn(string.format('Can\'t transition to "%s" at current time. Reason: %s', to, tostring(reason)))
+		warn(string.format('Can\'t transition to "%s" at current time. Reason: %s', self._pending:peek(), tostring(reason)))
 
 		if can then
 			local nextState = self._pending:dequeue()
