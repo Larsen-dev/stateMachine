@@ -237,7 +237,7 @@ function stateMachine._prototype:_transition<context>(to: string)
 		return
 	end
 
-	local transitionData: transitionData<context> = self._transition[current.name][to]
+	local transitionData: transitionData<context> = self._transitions[current.name][to]
 
 	self._transitioning = true
 
@@ -354,12 +354,18 @@ function stateMachine._prototype:bindUpdate<Args...>(
 
 		local can, reason =
 			if self._current then self:canTransitionNow(self._current.name, self._pending:peek()) else nil, nil
-		warn(string.format('Can\'t transition to "%s" at current time. Reason: %s', self._pending:peek(), tostring(reason)))
 
 		if can then
 			local nextState = self._pending:dequeue()
-
 			self:_transition(nextState)
+		else
+			warn(
+				string.format(
+					'Can\'t transition to "%s" at current time. Reason: %s',
+					self._pending:peek(),
+					tostring(reason)
+				)
+			)
 		end
 	end)
 end
