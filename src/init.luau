@@ -8,7 +8,7 @@ local collections = require(script.Packages.collections)
 
 -- Default guard function.
 local function default<context>(context: context): (boolean, string?)
-	return true
+	return true, nil
 end
 
 -- State
@@ -53,9 +53,9 @@ stateMachine._prototype = {}
 stateMachine.__index = stateMachine._prototype
 
 export type transitionData<context> = {
-	guard: (context: context) -> boolean,
+	guard: (context: context) -> (boolean, string?)?,
 	onTransition: ((context: context) -> ())?,
-	force: boolean,
+	force: boolean?,
 }
 
 type stateMachineData<context, args...> = {
@@ -124,12 +124,17 @@ end
 	@return ;
 	@param from string;
 	@param to string;
-	@param guard ((context: context) -> (boolean, string?))?;
+	@param data {
+		guard: (context: context) -> (boolean, string?),
+		onTransition: ((context: context) -> ())?,
+		force: boolean?
+	};
 
 	Registers transitions from some state to other.
 ]=]
 function stateMachine._prototype:registerTransition<context>(from: string, to: string, data: transitionData<context>)
 	data["guard"] = data["guard"] or default
+	data["force"] = data["force"] or false
 
 	if not self._transitions[from] then
 		self._transitions[from] = {}
@@ -141,12 +146,17 @@ end
 --[=[
 	@return ;
 	@param to string;
-	@param guard ((context: context) -> (boolean, string?))?;
+	@param data {
+		guard: (context: context) -> (boolean, string?),
+		onTransition: ((context: context) -> ())?,
+		force: boolean?
+	};
 
 	Registers transition to some transition from all registered states.
 ]=]
 function stateMachine._prototype:registerGlobalTransition<context>(to: string, data: transitionData<context>)
 	data["guard"] = data["guard"] or default
+	data["force"] = data["force"] or false
 
 	for name, _ in pairs(self._states) do
 		if not self._transitions[name] then
