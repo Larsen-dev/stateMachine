@@ -53,9 +53,9 @@ stateMachine._prototype = {}
 stateMachine.__index = stateMachine._prototype
 
 export type transitionData<context> = {
-	guard: (context: context) -> (boolean, string?)?,
+	guard: (context: context) -> (boolean, string?),
 	onTransition: ((context: context) -> ())?,
-	force: boolean?,
+	force: boolean,
 }
 
 type stateMachineData<context, args...> = {
@@ -124,17 +124,28 @@ end
 	@return ;
 	@param from string;
 	@param to string;
-	@param data {
-		guard: (context: context) -> (boolean, string?),
-		onTransition: ((context: context) -> ())?,
-		force: boolean?
-	};
+	@param guard: ((context: context) -> (boolean, string?))?;
+	@param onTransition: ((context: context) -> ())?;
+	@param force: boolean?;
 
 	Registers transitions from some state to other.
 ]=]
-function stateMachine._prototype:registerTransition<context>(from: string, to: string, data: transitionData<context>)
-	data["guard"] = data["guard"] or default
-	data["force"] = data["force"] or false
+function stateMachine._prototype:registerTransition<context>(
+	from: string,
+	to: string,
+	guard: ((context: context) -> (boolean, string?))?,
+	onTransition: ((context: context) -> ())?,
+	force: boolean?
+)
+	if not self._states[from] or not self._states[to] then
+		return
+	end
+
+	local data = {
+		guard = guard or default,
+		onTransition = onTransition,
+		force = force or false,
+	} :: transitionData<context>
 
 	if not self._transitions[from] then
 		self._transitions[from] = {}
@@ -146,17 +157,27 @@ end
 --[=[
 	@return ;
 	@param to string;
-	@param data {
-		guard: (context: context) -> (boolean, string?),
-		onTransition: ((context: context) -> ())?,
-		force: boolean?
-	};
+	@param guard: ((context: context) -> (boolean, string?))?;
+	@param onTransition: ((context: context) -> ())?;
+	@param force: boolean?;
 
 	Registers transition to some transition from all registered states.
 ]=]
-function stateMachine._prototype:registerGlobalTransition<context>(to: string, data: transitionData<context>)
-	data["guard"] = data["guard"] or default
-	data["force"] = data["force"] or false
+function stateMachine._prototype:registerGlobalTransition<context>(
+	to: string,
+	guard: ((context: context) -> (boolean, string?))?,
+	onTransition: ((context: context) -> ())?,
+	force: boolean?
+)
+	if not self._states[to] then
+		return
+	end
+
+	local data = {
+		guard = guard or default,
+		onTransition = onTransition,
+		force = force or false,
+	} :: transitionData<context>
 
 	for name, _ in pairs(self._states) do
 		if not self._transitions[name] then
@@ -205,7 +226,7 @@ function stateMachine._prototype:canTransitionNow(from: string, to: string): (bo
 
 	local fromState = self._states[from]
 	if not fromState.interruptible and not transition.force then
-		return false, "Can't transition from non-interuptible state without force."
+		return false, "Can't transition from non-interruptible state without force."
 	end
 
 	return transition.guard(self.context)
@@ -236,7 +257,7 @@ end
 ]=]
 function stateMachine._prototype:_transition<context>(to: string)
 	local current = self._current
-	if current and not current.interruptible then
+	if (not current or not current.name) or (current and not current.interruptible) then
 		return
 	end
 
@@ -338,7 +359,8 @@ end
 	@param to string;
 
 	Transitions machine to some state before update cycle
-	been binded.
+	been binded. Uses insecure :forceTransition(), use only
+	before life-cycle been started.
 ]=]
 function stateMachine._prototype:setInitialState(to: string)
 	self:forceTransition(to)
@@ -362,20 +384,24 @@ function stateMachine._prototype:bindUpdate<Args...>(
 			return
 		end
 
-		local can, reason =
-			if self._current then self:canTransitionNow(self._current.name, self._pending:peek()) else nil, nil
+		while not self._pending:isEmpty() do
+			local can, reason =
+				self._current and self:canTransitionNow(self._current.name, self._pending:peek()) or false, nil
 
-		if can then
-			local nextState = self._pending:dequeue()
-			self:_transition(nextState)
-		else
-			warn(
-				string.format(
-					'Can\'t transition to "%s" at current time. Reason: %s',
-					self._pending:peek(),
-					tostring(reason)
+			if can then
+				local nextState = self._pending:dequeue()
+				self:_transition(nextState)
+			else
+				warn(
+					string.format(
+						'Can\'t transition to "%s" at current time. Reason: %s',
+						self._pending:peek(),
+						tostring(reason)
+					)
 				)
-			)
+
+				break
+			end
 		end
 	end)
 end
