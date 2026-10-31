@@ -12,25 +12,25 @@ local function default<context>(context: context): (boolean, string?)
 end
 
 -- State
-local state = {}
-state._prototype = {}
-state.__index = state._prototype
-
 type stateData = {
 	name: string,
 	interruptible: boolean,
 }
 
-type statePrototype<context, args...> = {
+type statePrototype<context = { [string]: number }, args... = ...any> = {
 	onEnter: (self: state<context, args...>, context: context) -> ()?,
 	onLeave: (self: state<context, args...>, context: context) -> ()?,
 	update: (self: state<context, args...>, context: context, args...) -> ()?,
 }
 
-export type state<context, args...> = typeof(setmetatable(
-	{} :: stateData,
-	{ __index = {} :: statePrototype<context, args...> }
-))
+export type state<context = { [string]: number }, args... = ...any> = setmetatable<
+	stateData,
+	{ __index: statePrototype<context, args...> }
+>
+
+local state = {}
+state._prototype = {} :: statePrototype<>
+state.__index = state._prototype
 
 --[=[
 	@return state<context, args...>;
@@ -48,17 +48,13 @@ function state.new<context, args...>(name: string, interruptible: boolean?): sta
 end
 
 -- StateMachine
-local stateMachine = {}
-stateMachine._prototype = {}
-stateMachine.__index = stateMachine._prototype
-
-export type transitionData<context> = {
+export type transitionData<context = { [string]: number }> = {
 	guard: (context: context) -> (boolean, string?),
 	onTransition: ((context: context) -> ())?,
 	force: boolean,
 }
 
-type stateMachineData<context, args...> = {
+type stateMachineData<context = { [string]: number }, args... = ...any> = {
 	_previous: state<context, args...>?,
 	_current: state<context, args...>?,
 	_states: { [string]: state<context, args...> },
@@ -67,13 +63,13 @@ type stateMachineData<context, args...> = {
 	_pending: collections.queue<string>,
 
 	context: context,
-	transitioned: signal.Signal<string, string>,
-	entered: signal.Signal<string>,
-	left: signal.Signal<string>,
-	transitionFailed: signal.Signal<string, context>,
+	transitioned: signal.Signal<(from: string, to: string) -> (), string, string>,
+	entered: signal.Signal<(to: string) -> (), string>,
+	left: signal.Signal<(from: string) -> (), string>,
+	transitionFailed: signal.Signal<(reason: string, context: context) -> (), string, context>,
 }
 
-type stateMachinePrototype<context, args...> = {
+type stateMachinePrototype<context = { [string]: number }, args... = ...any> = {
 	registerState: (self: stateMachine<context, args...>, st: state<context, args...>) -> (),
 	registerTransition: (
 		self: stateMachine<context, args...>,
@@ -95,20 +91,25 @@ type stateMachinePrototype<context, args...> = {
 	setInitialState: (self: stateMachine<context, args...>, to: string) -> (),
 	bindUpdate: (
 		self: stateMachine<context, args...>,
-		to: RBXScriptSignal | signal.Signal<args...>
-	) -> RBXScriptConnection | signal.Connection<args...>,
+		to: RBXScriptSignal | signal.Signal<(context: string) -> (), string>
+	) -> RBXScriptConnection | signal.Signal<(context: string) -> (), string>,
 	bindTransition: (
 		self: stateMachine<context, args...>,
-		to: RBXScriptSignal | signal.Signal<args...>,
+		to: RBXScriptSignal | signal.Signal<(context: string) -> (), string>,
 		fromState: string,
 		toState: string
-	) -> (RBXScriptConnection | signal.Connection<args...>)?,
+	) -> (RBXScriptConnection | signal.Connection<(context) -> (), string>)?,
+	_transition: (self: stateMachine<context, args...>, to: string) -> (),
 }
 
-export type stateMachine<context, args...> = typeof(setmetatable(
-	{} :: stateMachineData<context, args...>,
-	{ __index = {} :: stateMachinePrototype<context, args...> }
-))
+export type stateMachine<context = { [string]: number }, args... = ...any> = setmetatable<
+	stateMachineData<context, args...>,
+	{ __index: stateMachinePrototype<context, args...> }
+>
+
+local stateMachine = {}
+stateMachine._prototype = {} :: stateMachinePrototype<>
+stateMachine.__index = stateMachine._prototype
 
 --[=[
 	@return ;
@@ -367,15 +368,15 @@ function stateMachine._prototype:setInitialState(to: string)
 end
 
 --[=[
-	@return RBXScriptConnection | Connection<Args...>;
-	@param to RBXScriptSignal | Signal<Args...>;
+	@return RBXScriptConnection | Connection<args...>;
+	@param to RBXScriptSignal | Signal<args...>;
 
 	Binds machine update cycle to some signal object.
 ]=]
-function stateMachine._prototype:bindUpdate<Args...>(
-	to: RBXScriptSignal | signal.Signal<Args...>
-): RBXScriptConnection | signal.Connection<Args...>
-	return to:Connect(function(...: Args...)
+function stateMachine._prototype:bindUpdate<args...>(
+	to: RBXScriptSignal | signal.Signal<(args...) -> (), args...>
+): RBXScriptConnection | signal.Connection<(args...) -> (), args...>
+	return to:Connect(function(...: args...)
 		if self._current and self._current.update then
 			self._current:update(self.context, ...)
 		end
@@ -386,16 +387,17 @@ function stateMachine._prototype:bindUpdate<Args...>(
 
 		while not self._pending:isEmpty() do
 			local can, reason =
-				self._current and self:canTransitionNow(self._current.name, self._pending:peek()) or false, nil
+				self._current and self:canTransitionNow(self._current.name, self._pending:peek() :: string) or false,
+				nil
 
 			if can then
-				local nextState = self._pending:dequeue()
+				local nextState = self._pending:dequeue() :: string
 				self:_transition(nextState)
 			else
 				warn(
 					string.format(
 						'Can\'t transition to "%s" at current time. Reason: %s',
-						self._pending:peek(),
+						self._pending:peek() :: string,
 						tostring(reason)
 					)
 				)
@@ -415,11 +417,13 @@ end
 	Binds transition from some state to another to some signal
 	object.
 ]=]
-function stateMachine._prototype:bindTransition<Args...>(
-	to: RBXScriptSignal | signal.Signal<Args...>,
+function stateMachine._prototype:bindTransition<args...>(
+	to: RBXScriptSignal | signal.Signal<(args...) -> (), args...>,
 	fromState: string,
 	toState: string
-): (RBXScriptConnection | signal.Connection<Args...>)?
+): (
+	RBXScriptConnection | signal.Connection<(args...) -> (), args...>
+)?
 	if not self:canTransition(fromState, toState) then
 		return
 	end
